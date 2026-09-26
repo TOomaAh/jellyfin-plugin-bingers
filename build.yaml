@@ -2,7 +2,7 @@
 name: "Bingers"
 guid: "ac5439e6-35f8-4c3c-b2ef-b69950d1c991"
 imageUrl: "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png"
-version: 1
+version: "2.0.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "TOomaAh"
@@ -14,4 +14,4 @@ category: "General"
 artifacts:
   - "Bingers.dll"
 changelog: |-
-  - Initial Bingers release, adapted from the Trakt plugin
+  - Scheduled tasks process the stored Bingers configurations instead of every Jellyfin user, and report configurations of deleted users
