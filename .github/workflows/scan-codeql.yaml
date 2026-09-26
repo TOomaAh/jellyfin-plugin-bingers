@@ -1,0 +1,20 @@
+name: '🔬 Run CodeQL'
+
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches: [ master ]
+    paths-ignore:
+      - '**/*.md'
+  schedule:
+    - cron: '24 2 * * 4'
+  workflow_dispatch:
+
+jobs:
+  call:
+    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/scan-codeql.yaml@9b367ad7b96c2a5e0ce27675815bc9755ae0a971 # master
+    with:
+      repository-name: jellyfin/jellyfin-plugin-trakt

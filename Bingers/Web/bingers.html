@@ -1,0 +1,127 @@
+<div id="bingersConfigurationPage" data-role="page"
+    class="page type-interior pluginConfigurationPage bingersConfigurationPage" data-controller="__plugin/bingersjs">
+    <div data-role="content">
+        <div class="content-primary">
+
+            <h1>Bingers</h1>
+
+            <form id="bingersConfigurationForm">
+
+                <div class="selectContainer">
+                    <select is="emby-select" id="selectUser" name="selectUser" label="Configure bingers.app for:"></select>
+                </div>
+
+                <div id="linkedSection" class="hide">
+                    <p id="linkedDescription"></p>
+                    <button is="emby-button" type="button" id="unlinkAccount" class="raised block">Unlink account</button>
+                </div>
+
+                <div id="linkSection" class="hide">
+                    <p id="reauthDescription" class="hide" style="color: #ff9800;"></p>
+                    <p class="fieldDescription">
+                        1. Open <a href="https://bingers.app/mobile-signin" class="button-link emby-button"
+                            target="_blank" rel="noopener noreferrer">https://bingers.app/mobile-signin</a>
+                        and request a sign-in link by email.<br />
+                        2. Copy the link from the email <b>without opening it</b> (a magic link can only be used once)
+                        and paste it below.
+                    </p>
+                    <div class="inputContainer">
+                        <input is="emby-input" type="text" id="txtMagicLink" label="Magic link from email:"
+                            autocomplete="off" />
+                    </div>
+                    <button is="emby-button" type="button" id="linkAccount" class="raised block">Link account</button>
+                </div>
+
+                <div>
+                    <h3 class="checkboxListLabel">Exclude library folders:</h3>
+                    <div id="divBingersLocations" class="paperList checkboxList checkboxList-paperList">
+                    </div>
+                </div>
+
+                <h2 style="margin-top: 2em;">Import from bingers.app to Jellyfin</h2>
+                <p class="fieldDescription">Control how watch history from bingers.app is brought into Jellyfin by the "Import watched history from bingers.app" task.</p>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkSkipWatchedImportFromBingers"
+                            name="chkSkipWatchedImportFromBingers" />
+                        <span>Keep Jellyfin's 'watched' status (don't import from bingers.app)</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Check this to prevent Jellyfin from marking an item as played, even if it is marked watched on bingers.app.
+                        Items are never marked unplayed by the import.
+                    </div>
+                </div>
+
+                <h2 style="margin-top: 2em;">Sync from Jellyfin to bingers.app</h2>
+                <p class="fieldDescription">Control how your Jellyfin viewing activity is sent to your bingers.app account.</p>
+
+                <h3 class="checkboxListLabel">Instant Sync (As it happens)</h3>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkScrobble" name="chkScrobble" />
+                        <span>Mark as 'watched' when playback finishes</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        When a movie or an episode is played to the end in Jellyfin, mark it as watched on bingers.app.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkPostSetWatched" name="chkPostSetWatched" />
+                        <span>Mark as 'watched' when manually marked as played</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        When you manually mark something as played in Jellyfin, immediately update it on bingers.app.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkMarkMoviesAsRewatched" name="chkMarkMoviesAsRewatched" />
+                        <span>Count movie rewatches</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Watching an already watched movie to the end increments its play count on bingers.app.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkMarkEpisodesAsRewatched" name="chkMarkEpisodesAsRewatched" />
+                        <span>Count episode rewatches</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Watching an already watched episode to the end increments its play count on bingers.app.
+                    </div>
+                </div>
+
+                <h3 class="checkboxListLabel" style="margin-top: 1.5em;">Scheduled Sync (During background task)</h3>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkPostWatchedHistory"
+                            name="chkPostWatchedHistory" />
+                        <span>Export 'watched' items during scheduled task</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        The "Export watched history to bingers.app" task marks everything watched in Jellyfin as watched on bingers.app.
+                    </div>
+                </div>
+
+                <h2 style="margin-top: 2em;">Advanced</h2>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkExtraLogging" name="chkExtraLogging" />
+                        <span>Enable debug logging</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        For troubleshooting only. Writes detailed logs at the Information level (no server log level change needed): every bingers.app request, how each item is matched in the catalog, and what the scheduled tasks do with each item.
+                    </div>
+                </div>
+
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                        <span>Save</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

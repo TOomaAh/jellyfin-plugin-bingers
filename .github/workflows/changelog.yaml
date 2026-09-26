@@ -1,0 +1,20 @@
+name: '📝 Create/Update Release Draft & Release Bump PR'
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - build.yaml
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - update-prep-command
+
+jobs:
+  call:
+    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/changelog.yaml@9b367ad7b96c2a5e0ce27675815bc9755ae0a971 # master
+    with:
+      repository-name: jellyfin/jellyfin-plugin-trakt
+    secrets:
+      token: ${{ secrets.JF_BOT_TOKEN }}
