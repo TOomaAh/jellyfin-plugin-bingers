@@ -11,14 +11,17 @@ using Microsoft.Extensions.Logging;
 namespace Bingers.Helpers;
 
 /// <summary>
-/// Helper class used to post items manually marked as played to bingers.app.
-/// Events are debounced so that marking a whole season or series as played is sent in one go.
+/// Helper class used to post items manually marked as played or unplayed to bingers.app.
+/// Events are debounced so that marking a whole season or series is sent in one go, and only the last state of an
+/// item is sent: marking an item played by mistake then unplayed within the delay sends nothing.
 /// </summary>
 internal sealed class UserDataManagerEventsHelper : IDisposable
 {
+    private static readonly TimeSpan _debounceDelay = TimeSpan.FromSeconds(5);
+
     private readonly ILogger<UserDataManagerEventsHelper> _logger;
     private readonly BingersApi _bingersApi;
-    private readonly Dictionary<Guid, List<BaseItem>> _queue;
+    private readonly Dictionary<Guid, Dictionary<Guid, PendingChange>> _queue;
     private readonly Timer _queueTimer;
 
     /// <summary>
@@ -28,66 +31,91 @@ internal sealed class UserDataManagerEventsHelper : IDisposable
     /// <param name="bingersApi">The <see cref="BingersApi"/>.</param>
     public UserDataManagerEventsHelper(ILogger<UserDataManagerEventsHelper> logger, BingersApi bingersApi)
     {
-        _queue = new Dictionary<Guid, List<BaseItem>>();
+        _queue = new Dictionary<Guid, Dictionary<Guid, PendingChange>>();
         _logger = logger;
         _bingersApi = bingersApi;
         _queueTimer = new Timer(OnTimerCallback, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
-    /// Queues an item marked as played by a bingers.app user.
+    /// Queues the new played state of an item for a bingers.app user. A later change of the same item replaces it.
     /// </summary>
     /// <param name="item">The item.</param>
+    /// <param name="played">Whether the item was marked played (<c>true</c>) or unplayed (<c>false</c>).</param>
+    /// <param name="send">Whether this state must be sent; <c>false</c> only cancels a pending change of the item.</param>
     /// <param name="bingersUser">The <see cref="BingersUser"/>.</param>
-    public void QueueWatched(BaseItem item, BingersUser bingersUser)
+    public void QueuePlayedState(BaseItem item, bool played, bool send, BingersUser bingersUser)
     {
         lock (_queue)
         {
             if (!_queue.TryGetValue(bingersUser.LinkedMbUserId, out var items))
             {
-                items = new List<BaseItem>();
+                items = new Dictionary<Guid, PendingChange>();
                 _queue[bingersUser.LinkedMbUserId] = items;
             }
 
-            if (items.All(i => i.Id != item.Id))
+            if (items.TryGetValue(item.Id, out var previous) && previous.Played != played)
             {
-                items.Add(item);
+                _logger.LogVerbose(
+                    bingersUser.ExtraLogging,
+                    "{Item} was marked {State} before its pending '{Previous}' change was sent to Bingers; the pending change is cancelled",
+                    item.Name,
+                    played ? "played" : "unplayed",
+                    previous.Played ? "watched" : "unwatched");
             }
 
-            _queueTimer.Change(TimeSpan.FromSeconds(5), Timeout.InfiniteTimeSpan);
+            if (send)
+            {
+                items[item.Id] = new PendingChange(item, played);
+            }
+            else
+            {
+                items.Remove(item.Id);
+            }
+
+            _queueTimer.Change(_debounceDelay, Timeout.InfiniteTimeSpan);
         }
     }
 
     private async void OnTimerCallback(object state)
     {
-        Dictionary<Guid, List<BaseItem>> queue;
+        Dictionary<Guid, List<PendingChange>> queue;
         lock (_queue)
         {
-            if (_queue.Count == 0)
-            {
-                return;
-            }
-
-            queue = new Dictionary<Guid, List<BaseItem>>(_queue);
+            queue = _queue
+                .Where(kv => kv.Value.Count > 0)
+                .ToDictionary(kv => kv.Key, kv => kv.Value.Values.ToList());
             _queue.Clear();
         }
 
-        foreach (var (userId, items) in queue)
+        foreach (var (userId, changes) in queue)
         {
             var bingersUser = UserHelper.GetBingersUser(userId, true);
             if (bingersUser == null)
             {
-                _logger.LogWarning("Dropping {Count} items marked played: Jellyfin user {UserId} is no longer linked to Bingers", items.Count, userId);
+                _logger.LogWarning("Dropping {Count} played state changes: Jellyfin user {UserId} is no longer linked to Bingers", changes.Count, userId);
                 continue;
             }
 
-            _logger.LogVerbose(bingersUser.ExtraLogging, "Sending {Count} items manually marked played to Bingers for user {UserId}", items.Count, userId);
+            _logger.LogVerbose(
+                bingersUser.ExtraLogging,
+                "Sending {Watched} items marked played and {Unwatched} marked unplayed to Bingers for user {UserId}",
+                changes.Count(c => c.Played),
+                changes.Count(c => !c.Played),
+                userId);
 
-            foreach (var item in items)
+            foreach (var change in changes)
             {
                 try
                 {
-                    await _bingersApi.MarkWatchedAsync(bingersUser, item, false, null, CancellationToken.None).ConfigureAwait(false);
+                    if (change.Played)
+                    {
+                        await _bingersApi.MarkWatchedAsync(bingersUser, change.Item, false, null, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await _bingersApi.MarkUnwatchedAsync(bingersUser, change.Item, CancellationToken.None).ConfigureAwait(false);
+                    }
                 }
                 catch (BingersApiException ex) when (ex.IsAuthError)
                 {
@@ -96,7 +124,7 @@ internal sealed class UserDataManagerEventsHelper : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to mark {Item} as watched on Bingers", item.Name);
+                    _logger.LogError(ex, "Failed to mark {Item} as {State} on Bingers", change.Item.Name, change.Played ? "watched" : "unwatched");
                 }
             }
         }
@@ -106,4 +134,6 @@ internal sealed class UserDataManagerEventsHelper : IDisposable
     {
         _queueTimer.Dispose();
     }
+
+    private sealed record PendingChange(BaseItem Item, bool Played);
 }

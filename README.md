@@ -9,13 +9,13 @@ integration of Scroblarr.
 Features, per Jellyfin user:
 
 - **Scrobbling**: an item played to the end is marked watched on bingers.app (optionally counting rewatches).
-- **Instant sync**: manually marking an item as played in Jellyfin marks it watched on bingers.app.
+- **Instant sync**: manually marking an item as played (or unplayed) in Jellyfin marks it watched (or unwatched) on bingers.app.
 - **Export task**: the *Export watched history to bingers.app* scheduled task pushes everything already watched in Jellyfin.
 - **Import task**: the *Import watched history from bingers.app* scheduled task marks as played in Jellyfin what is watched
   on bingers.app (and raises the play count to the Bingers value). It never marks items unplayed.
 - Library folders can be excluded.
 
-Bingers has no public "unwatch", collection or rating API, so those Trakt features are not available.
+Bingers has no collection or rating API, so those Trakt features are not available.
 
 ## Installation
 

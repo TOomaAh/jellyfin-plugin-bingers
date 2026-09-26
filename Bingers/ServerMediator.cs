@@ -47,7 +47,7 @@ public class ServerMediator : IHostedService, IDisposable
 
     /// <summary>
     /// User data was saved.
-    /// Let bingers.app know that the user manually marked an item as played.
+    /// Let bingers.app know that the user manually marked an item as played or unplayed.
     /// </summary>
     /// <param name="sender">The sending entity.</param>
     /// <param name="userDataSaveEventArgs">The <see cref="UserDataSaveEventArgs"/>.</param>
@@ -57,7 +57,7 @@ public class ServerMediator : IHostedService, IDisposable
         // Played to completion items are handled by the playback stopped event.
         if (userDataSaveEventArgs.SaveReason != UserDataSaveReason.TogglePlayed
             || userDataSaveEventArgs.Item == null
-            || userDataSaveEventArgs.UserData?.Played != true)
+            || userDataSaveEventArgs.UserData == null)
         {
             return;
         }
@@ -69,21 +69,25 @@ public class ServerMediator : IHostedService, IDisposable
         }
 
         var item = userDataSaveEventArgs.Item;
-        if (!bingersUser.PostSetWatched)
-        {
-            _logger.LogVerbose(bingersUser.ExtraLogging, "{Item} was marked played manually; not sent to Bingers (option disabled)", item.Name);
-            return;
-        }
+        var played = userDataSaveEventArgs.UserData.Played;
+        var state = played ? "played" : "unplayed";
 
         var reason = UserHelper.GetSyncBlockReason(item, bingersUser);
         if (reason != null)
         {
-            _logger.LogVerbose(bingersUser.ExtraLogging, "{Item} was marked played manually; not sent to Bingers: {Reason}", item.Name, reason);
+            _logger.LogVerbose(bingersUser.ExtraLogging, "{Item} was marked {State} manually; not sent to Bingers: {Reason}", item.Name, state, reason);
             return;
         }
 
-        _logger.LogVerbose(bingersUser.ExtraLogging, "{Item} was marked played manually; queued for Bingers", item.Name);
-        _userDataManagerEventsHelper.QueueWatched(item, bingersUser);
+        // Even when this direction is disabled, the change must cancel a pending opposite change of the same item
+        // (e.g. marked played by mistake, then unplayed before it was sent).
+        var send = played ? bingersUser.PostSetWatched : bingersUser.PostSetUnwatched;
+        _logger.LogVerbose(
+            bingersUser.ExtraLogging,
+            send ? "{Item} was marked {State} manually; queued for Bingers" : "{Item} was marked {State} manually; not sent to Bingers (option disabled)",
+            item.Name,
+            state);
+        _userDataManagerEventsHelper.QueuePlayedState(item, played, send, bingersUser);
     }
 
     /// <summary>

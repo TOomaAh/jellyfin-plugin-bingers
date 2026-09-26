@@ -18,6 +18,7 @@ public class BingersUser
         Cookies = Array.Empty<BingersCookie>();
         Scrobble = true;
         PostSetWatched = true;
+        PostSetUnwatched = true;
         PostWatchedHistory = true;
         SkipWatchedImportFromBingers = false;
         MarkMoviesAsRewatched = false;
@@ -70,6 +71,11 @@ public class BingersUser
     /// Gets or sets a value indicating whether manually marking an item as played should be posted to bingers.app.
     /// </summary>
     public bool PostSetWatched { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether manually marking an item as unplayed should mark it unwatched on bingers.app.
+    /// </summary>
+    public bool PostSetUnwatched { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the scheduled task should export the watched history to bingers.app.

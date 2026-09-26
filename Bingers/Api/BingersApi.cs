@@ -302,6 +302,55 @@ public partial class BingersApi
     }
 
     /// <summary>
+    /// Marks a movie or an episode as not watched on bingers.app, e.g. after it was marked played by mistake.
+    /// Entries that are not watched on bingers.app are left untouched.
+    /// </summary>
+    /// <param name="bingersUser">The user.</param>
+    /// <param name="item">The movie or episode.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/>.</param>
+    /// <returns>A <see cref="Task"/>.</returns>
+    public async Task MarkUnwatchedAsync(BingersUser bingersUser, BaseItem item, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(bingersUser);
+
+        var verbose = bingersUser.ExtraLogging;
+        _logger.LogVerbose(verbose, "Marking {Item} as unwatched on Bingers", DescribeItem(item));
+
+        var entities = await _catalog.ResolveAsync(item, verbose, cancellationToken).ConfigureAwait(false);
+
+        var userLock = _userLocks.GetOrAdd(bingersUser.LinkedMbUserId, _ => new SemaphoreSlim(1, 1));
+        await userLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RefreshSessionIfNeededAsync(bingersUser, cancellationToken).ConfigureAwait(false);
+
+            var ops = new List<BingersSyncOperation>();
+            foreach (var entity in entities)
+            {
+                var remote = await FetchRemoteEntryAsync(bingersUser, entity, cancellationToken).ConfigureAwait(false);
+                if (remote?.Watched != true)
+                {
+                    _logger.LogVerbose(verbose, "Skipping {Item} ({EntityKind} {EntityId}): not watched on Bingers ({Remote})", item.Name, entity.EntityKind, entity.EntityId, DescribeRemote(remote));
+                    continue;
+                }
+
+                _logger.LogVerbose(verbose, "Marking {Item} ({EntityKind} {EntityId}) as unwatched on Bingers (remote: {Remote})", item.Name, entity.EntityKind, entity.EntityId, DescribeRemote(remote));
+                ops.Add(CreateEntryOperation(entity, false, 0));
+            }
+
+            if (ops.Count > 0)
+            {
+                await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Marked {Item} as unwatched on Bingers for Jellyfin user {UserId}", DescribeItem(item), bingersUser.LinkedMbUserId);
+            }
+        }
+        finally
+        {
+            userLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Exports watched items to bingers.app. Entries already watched remotely are left untouched.
     /// </summary>
     /// <param name="bingersUser">The user.</param>
@@ -578,7 +627,9 @@ public partial class BingersApi
         return (Math.Max(localTarget, remotePlays + 1), false);
     }
 
-    private static BingersSyncOperation CreateWatchedOperation(BingersEntityRef entity, int plays) => new()
+    private static BingersSyncOperation CreateWatchedOperation(BingersEntityRef entity, int plays) => CreateEntryOperation(entity, true, plays);
+
+    private static BingersSyncOperation CreateEntryOperation(BingersEntityRef entity, bool watched, int plays) => new()
     {
         OpId = Guid.NewGuid().ToString(),
         Table = "entries",
@@ -589,7 +640,7 @@ public partial class BingersApi
         },
         Fields = new BingersEntryFields
         {
-            Watched = true,
+            Watched = watched,
             Plays = plays,
             BatchId = null
         }

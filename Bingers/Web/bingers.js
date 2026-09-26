@@ -5,6 +5,7 @@ const BingersConfigurationPage = {
         return {
             Scrobble: true,
             PostSetWatched: true,
+            PostSetUnwatched: true,
             PostWatchedHistory: true,
             SkipWatchedImportFromBingers: false,
             MarkMoviesAsRewatched: false,
@@ -26,6 +27,7 @@ const BingersConfigurationPage = {
             currentUserConfig.LocationsExcluded = currentUserConfig.LocationsExcluded || [];
             page.querySelector('#chkScrobble').checked = currentUserConfig.Scrobble;
             page.querySelector('#chkPostSetWatched').checked = currentUserConfig.PostSetWatched;
+            page.querySelector('#chkPostSetUnwatched').checked = currentUserConfig.PostSetUnwatched;
             page.querySelector('#chkPostWatchedHistory').checked = currentUserConfig.PostWatchedHistory;
             page.querySelector('#chkSkipWatchedImportFromBingers').checked = currentUserConfig.SkipWatchedImportFromBingers;
             page.querySelector('#chkMarkMoviesAsRewatched').checked = currentUserConfig.MarkMoviesAsRewatched;
@@ -127,6 +129,7 @@ function save(page) {
             }
             currentUserConfig.Scrobble = page.querySelector('#chkScrobble').checked;
             currentUserConfig.PostSetWatched = page.querySelector('#chkPostSetWatched').checked;
+            currentUserConfig.PostSetUnwatched = page.querySelector('#chkPostSetUnwatched').checked;
             currentUserConfig.PostWatchedHistory = page.querySelector('#chkPostWatchedHistory').checked;
             currentUserConfig.SkipWatchedImportFromBingers = page.querySelector('#chkSkipWatchedImportFromBingers').checked;
             currentUserConfig.MarkMoviesAsRewatched = page.querySelector('#chkMarkMoviesAsRewatched').checked;
