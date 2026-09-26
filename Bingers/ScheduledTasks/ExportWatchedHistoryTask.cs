@@ -69,30 +69,12 @@ public class ExportWatchedHistoryTask : IScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        var allUsers = _userManager.GetUsers().ToList();
-        var users = new List<(Jellyfin.Database.Implementations.Entities.User User, Model.BingersUser BingersUser)>();
-        foreach (var user in allUsers)
-        {
-            var bingersUser = UserHelper.GetBingersUser(user);
-            if (bingersUser == null)
-            {
-                _logger.LogDebug("Jellyfin user {User} has no Bingers configuration", user.Username);
-            }
-            else if (!bingersUser.IsLinked())
-            {
-                _logger.LogInformation("Jellyfin user {User} is not linked to a Bingers account{Reauth}", user.Username, bingersUser.NeedsReauthorization ? " (session expired, link it again)" : string.Empty);
-            }
-            else if (!bingersUser.PostWatchedHistory)
-            {
-                _logger.LogInformation("Jellyfin user {User} disabled the watched history export to Bingers", user.Username);
-            }
-            else
-            {
-                users.Add((user, bingersUser));
-            }
-        }
+        var users = UserHelper.GetTaskUsers(
+            _userManager,
+            _logger,
+            u => u.PostWatchedHistory,
+            "Jellyfin user {User} disabled the watched history export to Bingers");
 
-        _logger.LogInformation("Bingers export started for {Count} of {Total} Jellyfin users", users.Count, allUsers.Count);
         if (users.Count == 0)
         {
             return;

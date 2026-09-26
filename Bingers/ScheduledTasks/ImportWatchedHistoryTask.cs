@@ -77,30 +77,12 @@ public class ImportWatchedHistoryTask : IScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        var allUsers = _userManager.GetUsers().ToList();
-        var users = new List<(User User, BingersUser BingersUser)>();
-        foreach (var user in allUsers)
-        {
-            var bingersUser = UserHelper.GetBingersUser(user);
-            if (bingersUser == null)
-            {
-                _logger.LogDebug("Jellyfin user {User} has no Bingers configuration", user.Username);
-            }
-            else if (!bingersUser.IsLinked())
-            {
-                _logger.LogInformation("Jellyfin user {User} is not linked to a Bingers account{Reauth}", user.Username, bingersUser.NeedsReauthorization ? " (session expired, link it again)" : string.Empty);
-            }
-            else if (bingersUser.SkipWatchedImportFromBingers)
-            {
-                _logger.LogInformation("Jellyfin user {User} disabled the watched history import from Bingers", user.Username);
-            }
-            else
-            {
-                users.Add((user, bingersUser));
-            }
-        }
+        var users = UserHelper.GetTaskUsers(
+            _userManager,
+            _logger,
+            u => !u.SkipWatchedImportFromBingers,
+            "Jellyfin user {User} disabled the watched history import from Bingers");
 
-        _logger.LogInformation("Bingers import started for {Count} of {Total} Jellyfin users", users.Count, allUsers.Count);
         if (users.Count == 0)
         {
             return;
