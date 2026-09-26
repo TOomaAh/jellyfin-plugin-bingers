@@ -2,7 +2,7 @@
 name: "Bingers"
 guid: "ac5439e6-35f8-4c3c-b2ef-b69950d1c991"
 imageUrl: "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png"
-version: "2.0.0.0"
+version: "3.0.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "TOomaAh"
@@ -14,4 +14,7 @@ category: "General"
 artifacts:
   - "Bingers.dll"
 changelog: |-
-  - Scheduled tasks process the stored Bingers configurations instead of every Jellyfin user, and report configurations of deleted users
+  - Fix the export failing with "Duplicate pk in batch" when several library items are the same Bingers movie or episode; a batch rejected by Bingers no longer stops the export
+  - Marking an item unplayed in Jellyfin cancels a pending 'watched' update and marks it unwatched on Bingers (new option, enabled by default)
+  - Fix the export sending items shown as unplayed in Jellyfin (the played query also matches items whose other version is played)
+  - New manual task "Clean up watched history on bingers.app": marks as not watched on Bingers the entries whose library items are not played in Jellyfin (opt-in per user, dry run by default)
