@@ -27,6 +27,8 @@ internal static class BingersHttp
 
     public static readonly HttpClient Client = CreateClient();
 
+    private static readonly TimeSpan[] _retryDelays = { TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15) };
+
     public static HttpRequestMessage CreateRequest(HttpMethod method, string url, string cookieHeader = null)
     {
         var request = new HttpRequestMessage(method, url);
@@ -68,18 +70,55 @@ internal static class BingersHttp
         }
     }
 
+    /// <summary>
+    /// GETs and deserializes JSON. Timeouts, network errors and server errors (5xx) are retried; when every attempt
+    /// failed, a (non auth, non rate limit) <see cref="BingersApiException"/> is thrown so callers skip the item
+    /// instead of aborting a whole scheduled task.
+    /// </summary>
+    /// <typeparam name="T">The response type.</typeparam>
+    /// <param name="url">The URL.</param>
+    /// <param name="logger">The logger of the caller.</param>
+    /// <param name="verbose">Whether requests are logged in detail.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/>.</param>
+    /// <returns>The deserialized response.</returns>
     public static async Task<T> GetJsonAsync<T>(string url, ILogger logger, bool verbose, CancellationToken cancellationToken)
     {
-        using var request = CreateRequest(HttpMethod.Get, url);
-        using var response = await SendAsync(request, logger, verbose, cancellationToken).ConfigureAwait(false);
-        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
-
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using (stream.ConfigureAwait(false))
+        for (var attempt = 1; ; attempt++)
         {
-            return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                using var request = CreateRequest(HttpMethod.Get, url);
+                using var response = await SendAsync(request, logger, verbose, cancellationToken).ConfigureAwait(false);
+                await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+
+                var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using (stream.ConfigureAwait(false))
+                {
+                    return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (IsTransient(ex, cancellationToken))
+            {
+                if (attempt >= _retryDelays.Length + 1)
+                {
+                    throw new BingersApiException($"Bingers request failed after {attempt} attempts ({ex.Message}): {url}", ex);
+                }
+
+                var delay = _retryDelays[attempt - 1];
+                logger.LogWarning("Bingers request {Url} failed ({Error}); retry {Attempt} in {Delay} s", url, ex.Message, attempt, delay.TotalSeconds);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
+
+    private static bool IsTransient(Exception ex, CancellationToken cancellationToken) => ex switch
+    {
+        // An HttpClient timeout surfaces as a TaskCanceledException while the task itself was not cancelled.
+        TaskCanceledException => !cancellationToken.IsCancellationRequested,
+        HttpRequestException => true,
+        BingersApiException api => (int)api.StatusCode >= 500,
+        _ => false
+    };
 
     public static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
