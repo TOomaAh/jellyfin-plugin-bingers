@@ -9,6 +9,14 @@
         "imageUrl": "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png",
         "versions": [
             {
+                "version": "3.0.0.0",
+                "changelog": "<!-- Optional: add a release summary here -->\r\nInstall from the plugin repository `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`\r\nor download the zip attached to this release.\r\n\r\n- Fix the export failing with \"Duplicate pk in batch\" when several library items are the same Bingers movie or episode; a batch rejected by Bingers no longer stops the export\r\n- Marking an item unplayed in Jellyfin cancels a pending 'watched' update and marks it unwatched on Bingers (new option, enabled by default)\r\n- Fix the export sending items shown as unplayed in Jellyfin (the played query also matches items whose other version is played)\r\n- New manual task \"Clean up watched history on bingers.app\": marks as not watched on Bingers the entries whose library items are not played in Jellyfin (opt-in per user, dry run by default)",
+                "targetAbi": "12.1.0.0",
+                "sourceUrl": "https://github.com/TOomaAh/jellyfin-plugin-bingers/releases/download/v3/bingers_3.0.0.0.zip",
+                "checksum": "a5c1347bc5dd2f30c5d5497dfee398dd",
+                "timestamp": "2026-09-26T10:37:22Z"
+            },
+            {
                 "version": "2.0.0.0",
                 "changelog": "<!-- Optional: add a release summary here -->\r\nInstall from the plugin repository `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`\r\nor download the zip attached to this release.\r\n\r\n* No changes\r\n",
                 "targetAbi": "12.1.0.0",
