@@ -13,6 +13,9 @@ Features, per Jellyfin user:
 - **Export task**: the *Export watched history to bingers.app* scheduled task pushes everything already watched in Jellyfin.
 - **Import task**: the *Import watched history from bingers.app* scheduled task marks as played in Jellyfin what is watched
   on bingers.app (and raises the play count to the Bingers value). It never marks items unplayed.
+- **Clean up task** (manual, opt-in per user, dry run by default): the *Clean up watched history on bingers.app* task
+  marks as not watched on bingers.app the entries whose library items are not played in Jellyfin. Entries that are not
+  in the library are never touched.
 - Library folders can be excluded.
 
 Bingers has no collection or rating API, so those Trakt features are not available.

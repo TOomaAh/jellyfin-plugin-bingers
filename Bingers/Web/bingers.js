@@ -8,6 +8,8 @@ const BingersConfigurationPage = {
             PostSetUnwatched: true,
             PostWatchedHistory: true,
             SkipWatchedImportFromBingers: false,
+            CleanupWatchedHistory: false,
+            CleanupDryRun: true,
             MarkMoviesAsRewatched: false,
             MarkEpisodesAsRewatched: false,
             ExtraLogging: false
@@ -30,6 +32,8 @@ const BingersConfigurationPage = {
             page.querySelector('#chkPostSetUnwatched').checked = currentUserConfig.PostSetUnwatched;
             page.querySelector('#chkPostWatchedHistory').checked = currentUserConfig.PostWatchedHistory;
             page.querySelector('#chkSkipWatchedImportFromBingers').checked = currentUserConfig.SkipWatchedImportFromBingers;
+            page.querySelector('#chkCleanupWatchedHistory').checked = currentUserConfig.CleanupWatchedHistory;
+            page.querySelector('#chkCleanupDryRun').checked = currentUserConfig.CleanupDryRun;
             page.querySelector('#chkMarkMoviesAsRewatched').checked = currentUserConfig.MarkMoviesAsRewatched;
             page.querySelector('#chkMarkEpisodesAsRewatched').checked = currentUserConfig.MarkEpisodesAsRewatched;
             page.querySelector('#chkExtraLogging').checked = currentUserConfig.ExtraLogging;
@@ -132,6 +136,8 @@ function save(page) {
             currentUserConfig.PostSetUnwatched = page.querySelector('#chkPostSetUnwatched').checked;
             currentUserConfig.PostWatchedHistory = page.querySelector('#chkPostWatchedHistory').checked;
             currentUserConfig.SkipWatchedImportFromBingers = page.querySelector('#chkSkipWatchedImportFromBingers').checked;
+            currentUserConfig.CleanupWatchedHistory = page.querySelector('#chkCleanupWatchedHistory').checked;
+            currentUserConfig.CleanupDryRun = page.querySelector('#chkCleanupDryRun').checked;
             currentUserConfig.MarkMoviesAsRewatched = page.querySelector('#chkMarkMoviesAsRewatched').checked;
             currentUserConfig.MarkEpisodesAsRewatched = page.querySelector('#chkMarkEpisodesAsRewatched').checked;
             currentUserConfig.ExtraLogging = page.querySelector('#chkExtraLogging').checked;

@@ -588,6 +588,58 @@ public partial class BingersApi
     }
 
     /// <summary>
+    /// Marks entries as not watched on bingers.app, in batches. A batch rejected by Bingers is logged and the next ones
+    /// are still sent; an expired session or rate limiting stops.
+    /// </summary>
+    /// <param name="bingersUser">The user.</param>
+    /// <param name="entries">The entries to mark as not watched.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/>.</param>
+    /// <returns>The number of entries marked as not watched.</returns>
+    public async Task<int> UnwatchEntriesAsync(BingersUser bingersUser, IReadOnlyList<BingersSyncEntry> entries, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(bingersUser);
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var userLock = _userLocks.GetOrAdd(bingersUser.LinkedMbUserId, _ => new SemaphoreSlim(1, 1));
+        await userLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await RefreshSessionIfNeededAsync(bingersUser, cancellationToken).ConfigureAwait(false);
+
+            var removed = 0;
+            var batch = 0;
+            foreach (var chunk in entries.Chunk(PushBatchSize))
+            {
+                batch++;
+                var ops = chunk
+                    .Select(e => CreateEntryOperation(new BingersEntityRef(e.EntityKind, e.EntityId, null), false, 0))
+                    .ToList();
+                _logger.LogVerbose(bingersUser.ExtraLogging, "Sending Bingers unwatch batch {Batch} with {Count} entries", batch, ops.Count);
+                try
+                {
+                    await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
+                    removed += ops.Count;
+                }
+                catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
+                {
+                    _logger.LogWarning(
+                        "Bingers rejected unwatch batch {Batch} ({Count} entries): {Message}. Entries: {Entries}",
+                        batch,
+                        ops.Count,
+                        ex.Message,
+                        string.Join(", ", ops.Select(o => o.Pk.EntityKind + ":" + o.Pk.EntityId)));
+                }
+            }
+
+            return removed;
+        }
+        finally
+        {
+            userLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Sends an export batch. A batch rejected by Bingers is logged and counted so the export goes on with the next
     /// ones; an expired session or rate limiting still stops the export.
     /// </summary>

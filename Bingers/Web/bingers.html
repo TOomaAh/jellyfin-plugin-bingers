@@ -114,6 +114,29 @@
                     </div>
                 </div>
 
+                <h3 class="checkboxListLabel" style="margin-top: 1.5em;">Clean up (Manual task)</h3>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkCleanupWatchedHistory"
+                            name="chkCleanupWatchedHistory" />
+                        <span>Allow the clean up task for this user</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        The "Clean up watched history on bingers.app" task marks as not watched on bingers.app the entries
+                        whose movies or episodes are in the library but not played in Jellyfin (e.g. marked played by mistake
+                        and synced). Entries that are not in the library are never touched.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="chkCleanupDryRun" name="chkCleanupDryRun" />
+                        <span>Clean up dry run (only log what would change)</span>
+                    </label>
+                    <div class="fieldDescription checkboxFieldDescription">
+                        Keep this checked for a first run and review the logs, then uncheck it to apply the changes.
+                    </div>
+                </div>
+
                 <h2 style="margin-top: 2em;">Advanced</h2>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>

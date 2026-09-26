@@ -21,6 +21,8 @@ public class BingersUser
         PostSetUnwatched = true;
         PostWatchedHistory = true;
         SkipWatchedImportFromBingers = false;
+        CleanupWatchedHistory = false;
+        CleanupDryRun = true;
         MarkMoviesAsRewatched = false;
         MarkEpisodesAsRewatched = false;
         ExtraLogging = false;
@@ -86,6 +88,17 @@ public class BingersUser
     /// Gets or sets a value indicating whether the import task must leave the Jellyfin watched status untouched.
     /// </summary>
     public bool SkipWatchedImportFromBingers { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the clean up task may process this user: entries watched on bingers.app
+    /// whose library items are not played in Jellyfin are marked as not watched.
+    /// </summary>
+    public bool CleanupWatchedHistory { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the clean up task only logs what it would change.
+    /// </summary>
+    public bool CleanupDryRun { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether watching an already watched movie again increments its play count on bingers.app.
