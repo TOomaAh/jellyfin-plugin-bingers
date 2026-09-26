@@ -323,6 +323,11 @@ public partial class BingersApi
         var ops = new List<BingersSyncOperation>();
         var batch = 0;
 
+        // Several library items (duplicates, versions in different folders) can map to the same Bingers entity.
+        // Bingers rejects a batch with a duplicate key, and checking/sending the same entity twice is useless.
+        var handled = new Dictionary<(string Kind, string Id), string>();
+        var pending = new Dictionary<(string Kind, string Id), BingersSyncOperation>();
+
         var userLock = _userLocks.GetOrAdd(bingersUser.LinkedMbUserId, _ => new SemaphoreSlim(1, 1));
         await userLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -338,6 +343,20 @@ public partial class BingersApi
                     var entities = await _catalog.ResolveAsync(item, verbose, cancellationToken).ConfigureAwait(false);
                     foreach (var entity in entities)
                     {
+                        var key = (entity.EntityKind, entity.EntityId);
+                        if (handled.TryGetValue(key, out var firstItem))
+                        {
+                            if (pending.TryGetValue(key, out var queued) && playCount > queued.Fields.Plays)
+                            {
+                                queued.Fields.Plays = playCount;
+                            }
+
+                            result.Duplicates++;
+                            _logger.LogVerbose(verbose, "[{Index}/{Total}] {Item}: same Bingers {EntityKind} {EntityId} as {FirstItem}, skipped", i + 1, items.Count, label, entity.EntityKind, entity.EntityId, firstItem);
+                            continue;
+                        }
+
+                        handled[key] = label;
                         var remote = await FetchRemoteEntryAsync(bingersUser, entity, cancellationToken).ConfigureAwait(false);
                         if (remote is { Watched: true, Plays: > 0 })
                         {
@@ -348,7 +367,9 @@ public partial class BingersApi
 
                         var plays = Math.Max(1, playCount);
                         _logger.LogVerbose(verbose, "[{Index}/{Total}] {Item}: queued as watched with {Plays} plays ({EntityKind} {EntityId}, remote: {Remote})", i + 1, items.Count, label, plays, entity.EntityKind, entity.EntityId, DescribeRemote(remote));
-                        ops.Add(CreateWatchedOperation(entity, plays));
+                        var operation = CreateWatchedOperation(entity, plays);
+                        ops.Add(operation);
+                        pending[key] = operation;
                         result.Exported++;
                     }
                 }
@@ -361,10 +382,9 @@ public partial class BingersApi
 
                 if (ops.Count >= PushBatchSize)
                 {
-                    batch++;
-                    _logger.LogVerbose(verbose, "Sending Bingers batch {Batch} with {Count} entries", batch, ops.Count);
-                    await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
+                    await PushBatchAsync(bingersUser, ops, ++batch, result, cancellationToken).ConfigureAwait(false);
                     ops.Clear();
+                    pending.Clear();
                 }
 
                 if (verbose && (i + 1) % 25 == 0)
@@ -383,9 +403,7 @@ public partial class BingersApi
 
             if (ops.Count > 0)
             {
-                batch++;
-                _logger.LogVerbose(verbose, "Sending Bingers batch {Batch} with {Count} entries", batch, ops.Count);
-                await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
+                await PushBatchAsync(bingersUser, ops, ++batch, result, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -518,6 +536,30 @@ public partial class BingersApi
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Sends an export batch. A batch rejected by Bingers is logged and counted so the export goes on with the next
+    /// ones; an expired session or rate limiting still stops the export.
+    /// </summary>
+    private async Task PushBatchAsync(BingersUser bingersUser, List<BingersSyncOperation> ops, int batch, BingersExportResult result, CancellationToken cancellationToken)
+    {
+        _logger.LogVerbose(bingersUser.ExtraLogging, "Sending Bingers batch {Batch} with {Count} entries", batch, ops.Count);
+        try
+        {
+            await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
+        }
+        catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
+        {
+            result.Exported -= ops.Count;
+            result.Failed += ops.Count;
+            _logger.LogWarning(
+                "Bingers rejected export batch {Batch} ({Count} entries): {Message}. Entries: {Entries}",
+                batch,
+                ops.Count,
+                ex.Message,
+                string.Join(", ", ops.Select(o => o.Pk.EntityKind + ":" + o.Pk.EntityId)));
+        }
     }
 
     private static (int Plays, bool Skip) ComputePlays(BingersSyncEntry remote, bool allowRewatch, int? localPlayCount)

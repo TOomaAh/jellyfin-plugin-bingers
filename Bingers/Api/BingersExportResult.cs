@@ -23,6 +23,16 @@ public class BingersExportResult
     public int NotFound { get; set; }
 
     /// <summary>
+    /// Gets or sets the number of library items skipped because another item already maps to the same Bingers entry.
+    /// </summary>
+    public int Duplicates { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of entries in batches rejected by bingers.app.
+    /// </summary>
+    public int Failed { get; set; }
+
+    /// <summary>
     /// Gets the items that could not be matched in the bingers.app catalog.
     /// </summary>
     public Collection<string> NotFoundItems { get; } = new();

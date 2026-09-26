@@ -115,12 +115,14 @@ public class ExportWatchedHistoryTask : IScheduledTask
                 var userProgress = new Progress<double>(percent => progress.Report(baseProgress + (percent * percentPerUser / 100d)));
                 var result = await _bingersApi.ExportWatchedAsync(bingersUser, items, userProgress, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation(
-                    "Bingers export for user {User} finished in {Elapsed}: {Exported} marked watched, {AlreadyWatched} already watched, {NotFound} not found in the catalog",
+                    "Bingers export for user {User} finished in {Elapsed}: {Exported} marked watched, {AlreadyWatched} already watched, {NotFound} not found in the catalog, {Duplicates} duplicates, {Failed} rejected by Bingers",
                     user.Username,
                     stopwatch.Elapsed.ToString(@"hh\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture),
                     result.Exported,
                     result.AlreadyWatched,
-                    result.NotFound);
+                    result.NotFound,
+                    result.Duplicates,
+                    result.Failed);
 
                 if (result.NotFoundItems.Count > 0)
                 {
