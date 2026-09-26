@@ -153,6 +153,7 @@ public class ExportWatchedHistoryTask : IScheduledTask
     {
         var items = new List<(BaseItem Item, int PlayCount)>();
         var skipped = 0;
+        var notPlayed = 0;
         var query = new InternalItemsQuery(user)
         {
             IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
@@ -181,13 +182,35 @@ public class ExportWatchedHistoryTask : IScheduledTask
                     continue;
                 }
 
-                var playCount = _userDataManager.GetUserData(user, item)?.PlayCount ?? 0;
-                items.Add((item, playCount));
+                // The IsPlayed query also matches an item when another version of its version group has a played
+                // row, so it can return items shown as unplayed in Jellyfin. Trust the item's own user data only.
+                var userData = _userDataManager.GetUserData(user, item);
+                if (userData?.Played != true)
+                {
+                    notPlayed++;
+                    _logger.LogVerbose(
+                        verbose,
+                        "Not exporting \"{Item}\" ({Path}): returned by Jellyfin's played query but not played for the user (play count {PlayCount})",
+                        item.Name,
+                        item.Path,
+                        userData?.PlayCount ?? 0);
+                    continue;
+                }
+
+                items.Add((item, userData.PlayCount));
             }
         }
         while (page.Count == PageSize);
 
-        _logger.LogVerbose(verbose, "Found {Count} played items in the library of user {User}, {Skipped} skipped", items.Count + skipped, user.Username, skipped);
+        if (notPlayed > 0)
+        {
+            _logger.LogInformation(
+                "Ignored {Count} items of user {User} that Jellyfin's played query returned although they are not played (e.g. another version of the item is played)",
+                notPlayed,
+                user.Username);
+        }
+
+        _logger.LogVerbose(verbose, "Found {Count} played items in the library of user {User}, {Skipped} skipped", items.Count + skipped + notPlayed, user.Username, skipped + notPlayed);
         return items;
     }
 }
