@@ -96,45 +96,89 @@ public class CleanupWatchedHistoryTask : IScheduledTask
             try
             {
                 var entries = await _bingersApi.PullWatchedEntriesAsync(bingersUser, cancellationToken).ConfigureAwait(false);
+                // Entries are cleaned up batch by batch while the matching goes on: a cancelled or failing run keeps
+                // what was already done. Entries marked as not watched are remembered: if another copy of the item
+                // shows up played in a later batch (a show that could not be grouped with the first one), the entry
+                // is marked watched again.
+                var removedEntries = new Dictionary<string, BingersSyncEntry>(StringComparer.Ordinal);
+                var toRemoveCount = 0;
+                var removed = 0;
+                var restored = 0;
+                var kept = 0;
+
                 var matches = await _matcher.MatchAsync(
                     user,
                     bingersUser,
                     entries,
-                    new Progress<double>(percent => progress.Report(baseProgress + (percent * percentPerUser * 0.9 / 100d))),
-                    cancellationToken).ConfigureAwait(false);
-
-                // Keep an entry as soon as one of its library items (duplicates, versions) is played.
-                var toRemove = new List<BingersSyncEntry>();
-                var kept = 0;
-                foreach (var match in matches.Matches)
-                {
-                    if (match.Items.Any(item => _userDataManager.GetUserData(user, item)?.Played == true))
+                    async batch =>
                     {
-                        kept++;
-                        continue;
-                    }
+                        var toRemove = new List<BingersSyncEntry>();
+                        var toRestore = new List<BingersSyncEntry>();
+                        foreach (var match in batch)
+                        {
+                            // Keep an entry as soon as one of its library items (duplicates, versions) is played.
+                            var played = match.Items.Any(item => _userDataManager.GetUserData(user, item)?.Played == true);
+                            var key = match.Entry.EntityKind + ":" + match.Entry.EntityId;
 
-                    toRemove.Add(match.Entry);
-                    _logger.LogInformation(
-                        "{Action} {Item} ({EntityKind} {EntityId}): watched on Bingers but not played in Jellyfin",
-                        dryRun ? "Would mark as not watched" : "Marking as not watched",
-                        match.Label,
-                        match.Entry.EntityKind,
-                        match.Entry.EntityId);
-                }
+                            if (match.Repeated)
+                            {
+                                if (played && removedEntries.Remove(key))
+                                {
+                                    toRestore.Add(match.Entry);
+                                    _logger.LogInformation(
+                                        "{Action} {Item} ({EntityKind} {EntityId}): another copy is played in Jellyfin",
+                                        dryRun ? "Would keep as watched" : "Marking as watched again",
+                                        match.Label,
+                                        match.Entry.EntityKind,
+                                        match.Entry.EntityId);
+                                }
 
-                var removed = 0;
-                if (!dryRun && toRemove.Count > 0)
-                {
-                    removed = await _bingersApi.UnwatchEntriesAsync(bingersUser, toRemove, cancellationToken).ConfigureAwait(false);
-                }
+                                continue;
+                            }
+
+                            if (played)
+                            {
+                                kept++;
+                                continue;
+                            }
+
+                            toRemove.Add(match.Entry);
+                            removedEntries[key] = match.Entry;
+                            _logger.LogInformation(
+                                "{Action} {Item} ({EntityKind} {EntityId}): watched on Bingers but not played in Jellyfin",
+                                dryRun ? "Would mark as not watched" : "Marking as not watched",
+                                match.Label,
+                                match.Entry.EntityKind,
+                                match.Entry.EntityId);
+                        }
+
+                        toRemoveCount += toRemove.Count - toRestore.Count;
+                        if (dryRun)
+                        {
+                            return;
+                        }
+
+                        if (toRemove.Count > 0)
+                        {
+                            removed += await _bingersApi.SetEntriesWatchedAsync(bingersUser, toRemove, false, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        if (toRestore.Count > 0)
+                        {
+                            restored += await _bingersApi.SetEntriesWatchedAsync(bingersUser, toRestore, true, cancellationToken).ConfigureAwait(false);
+                        }
+                    },
+                    new Progress<double>(percent => progress.Report(baseProgress + (percent * percentPerUser / 100d))),
+                    cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Bingers clean up for user {User} finished in {Elapsed}: {ToRemove} entries not played in Jellyfin{Result}, {Kept} kept (played in Jellyfin), {Unmatched} not in the library (left untouched)",
                     user.Username,
                     stopwatch.Elapsed.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture),
-                    toRemove.Count,
-                    dryRun ? " (dry run, nothing changed: disable the dry run in the plugin settings to apply)" : $" ({removed} marked as not watched)",
+                    toRemoveCount,
+                    dryRun
+                        ? " (dry run, nothing changed: disable the dry run in the plugin settings to apply)"
+                        : $" ({removed - restored} marked as not watched{(restored > 0 ? $", {restored} restored" : string.Empty)})",
                     kept,
                     matches.Unmatched.Count);
             }

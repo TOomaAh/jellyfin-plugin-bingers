@@ -100,29 +100,42 @@ public class ImportWatchedHistoryTask : IScheduledTask
             try
             {
                 var entries = await _bingersApi.PullWatchedEntriesAsync(bingersUser, cancellationToken).ConfigureAwait(false);
+                // Items are updated batch by batch while the matching goes on: a cancelled or failing run keeps
+                // what was already imported.
+                var updated = 0;
+                var upToDate = 0;
                 var matches = await _matcher.MatchAsync(
                     user,
                     bingersUser,
                     entries,
+                    batch =>
+                    {
+                        var before = updated;
+                        foreach (var match in batch)
+                        {
+                            foreach (var item in match.Items)
+                            {
+                                if (MarkPlayed(user, bingersUser, item, match.Label, match.Entry, cancellationToken))
+                                {
+                                    updated++;
+                                }
+                                else
+                                {
+                                    upToDate++;
+                                }
+                            }
+                        }
+
+                        _logger.LogInformation(
+                            "Bingers import for user {User}: batch of {Count} entries applied, {Updated} items marked played ({Total} so far)",
+                            user.Username,
+                            batch.Count,
+                            updated - before,
+                            updated);
+                        return Task.CompletedTask;
+                    },
                     new Progress<double>(percent => progress.Report(baseProgress + (percent * percentPerUser / 100d))),
                     cancellationToken).ConfigureAwait(false);
-
-                var updated = 0;
-                var upToDate = 0;
-                foreach (var match in matches.Matches)
-                {
-                    foreach (var item in match.Items)
-                    {
-                        if (MarkPlayed(user, bingersUser, item, match.Label, match.Entry, cancellationToken))
-                        {
-                            updated++;
-                        }
-                        else
-                        {
-                            upToDate++;
-                        }
-                    }
-                }
 
                 _logger.LogInformation(
                     "Bingers import for user {User} finished in {Elapsed}: {Updated} items updated, {UpToDate} already up to date, {Unmatched} watched entries not found in the library",

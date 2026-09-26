@@ -588,14 +588,16 @@ public partial class BingersApi
     }
 
     /// <summary>
-    /// Marks entries as not watched on bingers.app, in batches. A batch rejected by Bingers is logged and the next ones
-    /// are still sent; an expired session or rate limiting stops.
+    /// Marks entries as watched (keeping their play count) or not watched on bingers.app, in batches. A batch rejected
+    /// by Bingers or failing on the network is logged and the next ones are still sent; an expired session or rate
+    /// limiting stops.
     /// </summary>
     /// <param name="bingersUser">The user.</param>
-    /// <param name="entries">The entries to mark as not watched.</param>
+    /// <param name="entries">The entries, each at most once.</param>
+    /// <param name="watched">Whether the entries are marked watched or not watched.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/>.</param>
-    /// <returns>The number of entries marked as not watched.</returns>
-    public async Task<int> UnwatchEntriesAsync(BingersUser bingersUser, IReadOnlyList<BingersSyncEntry> entries, CancellationToken cancellationToken)
+    /// <returns>The number of entries updated.</returns>
+    public async Task<int> SetEntriesWatchedAsync(BingersUser bingersUser, IReadOnlyList<BingersSyncEntry> entries, bool watched, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(bingersUser);
         ArgumentNullException.ThrowIfNull(entries);
@@ -612,18 +614,22 @@ public partial class BingersApi
             {
                 batch++;
                 var ops = chunk
-                    .Select(e => CreateEntryOperation(new BingersEntityRef(e.EntityKind, e.EntityId, null), false, 0))
+                    .Select(e => CreateEntryOperation(
+                        new BingersEntityRef(e.EntityKind, e.EntityId, null),
+                        watched,
+                        watched ? Math.Max(1, e.Plays ?? 1) : 0))
                     .ToList();
-                _logger.LogVerbose(bingersUser.ExtraLogging, "Sending Bingers unwatch batch {Batch} with {Count} entries", batch, ops.Count);
+                _logger.LogVerbose(bingersUser.ExtraLogging, "Sending Bingers {Kind} batch {Batch} with {Count} entries", watched ? "watched" : "unwatch", batch, ops.Count);
                 try
                 {
                     await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
                     removed += ops.Count;
                 }
-                catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
+                catch (Exception ex) when (IsBatchFailure(ex, cancellationToken))
                 {
                     _logger.LogWarning(
-                        "Bingers rejected unwatch batch {Batch} ({Count} entries): {Message}. Entries: {Entries}",
+                        "Bingers {Kind} batch {Batch} ({Count} entries) failed: {Message}. Entries: {Entries}",
+                        watched ? "watched" : "unwatch",
                         batch,
                         ops.Count,
                         ex.Message,
@@ -650,7 +656,7 @@ public partial class BingersApi
         {
             await PushAsync(bingersUser, ops, cancellationToken).ConfigureAwait(false);
         }
-        catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
+        catch (Exception ex) when (IsBatchFailure(ex, cancellationToken))
         {
             result.Exported -= ops.Count;
             result.Failed += ops.Count;
@@ -662,6 +668,17 @@ public partial class BingersApi
                 string.Join(", ", ops.Select(o => o.Pk.EntityKind + ":" + o.Pk.EntityId)));
         }
     }
+
+    /// <summary>
+    /// Failures of a single batch that must not stop a scheduled task: rejected by Bingers, timeout, network error.
+    /// </summary>
+    private static bool IsBatchFailure(Exception ex, CancellationToken cancellationToken) => ex switch
+    {
+        BingersApiException api => !api.IsAuthError && !api.IsRateLimited,
+        TaskCanceledException => !cancellationToken.IsCancellationRequested,
+        HttpRequestException => true,
+        _ => false
+    };
 
     private static (int Plays, bool Skip) ComputePlays(BingersSyncEntry remote, bool allowRewatch, int? localPlayCount)
     {

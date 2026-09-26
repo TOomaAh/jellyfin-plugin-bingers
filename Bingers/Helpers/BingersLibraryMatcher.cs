@@ -19,12 +19,19 @@ using Microsoft.Extensions.Logging;
 namespace Bingers.Helpers;
 
 /// <summary>
-/// Finds the library items of bingers.app entries.
-/// Movie entries point to catalog titles and are matched through their external ids; episode entries only carry the
-/// episode id, so the library episodes are resolved in the catalog (show and season lookups are cached).
+/// Finds the library items of bingers.app entries and hands them out in batches, so callers apply their changes while
+/// the (long) matching goes on.
+/// Movie entries point to catalog titles and are matched through their external ids, with all their library copies at
+/// once. Episode entries only carry the episode id, so the library episodes are resolved in the catalog, show by show:
+/// the copies of a show (same provider id or name) are resolved together and a batch never splits them.
 /// </summary>
 internal sealed class BingersLibraryMatcher
 {
+    /// <summary>
+    /// Minimum number of matches per batch; episode batches are only cut between two shows.
+    /// </summary>
+    public const int BatchSize = 50;
+
     private readonly ILibraryManager _libraryManager;
     private readonly BingersCatalogResolver _catalog;
     private readonly ILogger _logger;
@@ -40,17 +47,19 @@ internal sealed class BingersLibraryMatcher
         User user,
         BingersUser bingersUser,
         IReadOnlyList<BingersSyncEntry> entries,
+        Func<IReadOnlyList<BingersLibraryMatch>, Task> onBatch,
         IProgress<double> progress,
         CancellationToken cancellationToken)
     {
         var result = new BingersLibraryMatchResult();
-        await MatchMoviesAsync(user, bingersUser, entries, result, cancellationToken).ConfigureAwait(false);
+        await MatchMoviesAsync(user, bingersUser, entries, result, onBatch, cancellationToken).ConfigureAwait(false);
         progress?.Report(10);
         await MatchEpisodesAsync(
             user,
             bingersUser,
             entries,
             result,
+            onBatch,
             new Progress<double>(percent => progress?.Report(10 + (percent * 0.9))),
             cancellationToken).ConfigureAwait(false);
         return result;
@@ -61,6 +70,7 @@ internal sealed class BingersLibraryMatcher
         BingersUser bingersUser,
         IReadOnlyList<BingersSyncEntry> entries,
         BingersLibraryMatchResult result,
+        Func<IReadOnlyList<BingersLibraryMatch>, Task> onBatch,
         CancellationToken cancellationToken)
     {
         var verbose = bingersUser.ExtraLogging;
@@ -110,6 +120,7 @@ internal sealed class BingersLibraryMatcher
             user.Username,
             withoutIds);
 
+        var batch = new List<BingersLibraryMatch>();
         for (var i = 0; i < movieEntries.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -152,7 +163,19 @@ internal sealed class BingersLibraryMatcher
                 ids,
                 entry.Plays,
                 label);
-            result.Matches.Add(new BingersLibraryMatch(entry, matches, label));
+            batch.Add(new BingersLibraryMatch(entry, matches, label, false));
+            result.Matched++;
+
+            if (batch.Count >= BatchSize)
+            {
+                await onBatch(batch).ConfigureAwait(false);
+                batch = new List<BingersLibraryMatch>();
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            await onBatch(batch).ConfigureAwait(false);
         }
     }
 
@@ -161,6 +184,7 @@ internal sealed class BingersLibraryMatcher
         BingersUser bingersUser,
         IReadOnlyList<BingersSyncEntry> entries,
         BingersLibraryMatchResult result,
+        Func<IReadOnlyList<BingersLibraryMatch>, Task> onBatch,
         IProgress<double> progress,
         CancellationToken cancellationToken)
     {
@@ -193,76 +217,196 @@ internal sealed class BingersLibraryMatcher
             episodes.Add(episode);
         }
 
+        // Copies of a show (several libraries, 4K versions...) share a provider id or a name: keep them together.
+        var shows = GroupByShow(episodes);
+
         _logger.LogInformation(
-            "Matching {Entries} watched Bingers episodes against {Episodes} library episodes of {Series} series of user {User}",
+            "Matching {Entries} watched Bingers episodes against {Episodes} library episodes of {Shows} shows of user {User}",
             episodeEntries.Count,
             episodes.Count,
-            episodes.Select(e => e.SeriesId).Distinct().Count(),
+            shows.Count,
             user.Username);
 
-        var matched = new Dictionary<string, (List<BaseItem> Items, string Label)>(StringComparer.Ordinal);
-        var failedSeries = new HashSet<Guid>();
-        var matchedPerSeries = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (var i = 0; i < episodes.Count; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var episode = episodes[i];
-            var label = $"\"{episode.SeriesName}\" S{episode.ParentIndexNumber ?? episode.Season?.IndexNumber:00}E{episode.IndexNumber:00}";
+        var emitted = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Dictionary<string, (List<BaseItem> Items, string Label, bool Repeated)>(StringComparer.Ordinal);
+        var failedShows = 0;
+        var done = 0;
 
-            try
+        foreach (var show in shows)
+        {
+            var showName = show[0].SeriesName;
+            var showFailure = (string)null;
+            var matchedInShow = 0;
+
+            foreach (var episode in show)
             {
-                var refs = await _catalog.ResolveAsync(episode, verbose, cancellationToken).ConfigureAwait(false);
-                foreach (var entityRef in refs.Where(r => episodeEntries.ContainsKey(r.EntityId)))
+                cancellationToken.ThrowIfCancellationRequested();
+                done++;
+                progress?.Report(100d * done / episodes.Count);
+
+                if (showFailure != null)
                 {
-                    if (!matched.TryGetValue(entityRef.EntityId, out var match))
+                    continue;
+                }
+
+                var label = $"\"{episode.SeriesName}\" S{episode.ParentIndexNumber ?? episode.Season?.IndexNumber:00}E{episode.IndexNumber:00}";
+                try
+                {
+                    var refs = await _catalog.ResolveAsync(episode, verbose, cancellationToken).ConfigureAwait(false);
+                    foreach (var entityRef in refs.Where(r => episodeEntries.ContainsKey(r.EntityId)))
                     {
-                        match = (new List<BaseItem>(), label);
-                        matched[entityRef.EntityId] = match;
-                        var series = episode.SeriesName ?? string.Empty;
-                        matchedPerSeries[series] = matchedPerSeries.GetValueOrDefault(series) + 1;
+                        if (!pending.TryGetValue(entityRef.EntityId, out var match))
+                        {
+                            match = (new List<BaseItem>(), label, emitted.Contains(entityRef.EntityId));
+                            pending[entityRef.EntityId] = match;
+                            matchedInShow++;
+                        }
+
+                        match.Items.Add(episode);
                     }
-
-                    match.Items.Add(episode);
                 }
-            }
-            catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
-            {
-                // Show-level failures would repeat for every episode: report them once per series.
-                var isSeriesFailure = ex.Message.StartsWith("Could not resolve Bingers show", StringComparison.Ordinal);
-                if (!isSeriesFailure || failedSeries.Add(episode.SeriesId))
+                catch (BingersApiException ex) when (!ex.IsAuthError && !ex.IsRateLimited)
                 {
-                    _logger.LogVerbose(verbose, "Skipping {Episode}: {Message}", label, ex.Message);
+                    // A show that can't be found or whose requests keep failing would fail for each of its episodes:
+                    // skip the rest of the show. Season/episode level misses only skip the episode.
+                    if (ex.Message.StartsWith("Could not resolve Bingers show", StringComparison.Ordinal)
+                        || ex.Message.StartsWith("Bingers request failed after", StringComparison.Ordinal))
+                    {
+                        showFailure = ex.Message;
+                        failedShows++;
+                        _logger.LogInformation("Skipping show \"{Show}\" ({Count} episodes): {Message}", showName, show.Count, ex.Message);
+                    }
+                    else
+                    {
+                        _logger.LogVerbose(verbose, "Skipping {Episode}: {Message}", label, ex.Message);
+                    }
                 }
             }
 
-            if (verbose && (i + 1) % 100 == 0)
+            if (matchedInShow > 0)
             {
-                _logger.LogInformation("Progress: {Done}/{Total} library episodes checked, {Matched} Bingers episodes matched", i + 1, episodes.Count, matched.Count);
+                _logger.LogVerbose(verbose, "\"{Show}\": {Count} watched episodes found on Bingers", showName, matchedInShow);
             }
 
-            progress?.Report(100d * (i + 1) / episodes.Count);
-        }
-
-        foreach (var (series, count) in matchedPerSeries.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            _logger.LogVerbose(verbose, "\"{Series}\": {Count} watched episodes found on Bingers", series, count);
-        }
-
-        if (failedSeries.Count > 0)
-        {
-            _logger.LogInformation("{Count} series of user {User} could not be found in the Bingers catalog", failedSeries.Count, user.Username);
-        }
-
-        foreach (var (entityId, entry) in episodeEntries)
-        {
-            if (matched.TryGetValue(entityId, out var match))
+            // Cut batches between shows only, so all the copies of an episode are decided together.
+            if (pending.Count >= BatchSize)
             {
-                result.Matches.Add(new BingersLibraryMatch(entry, match.Items, match.Label));
+                await FlushAsync(pending, emitted, episodeEntries, result, onBatch).ConfigureAwait(false);
             }
-            else
+
+            if (verbose)
             {
-                result.Unmatched.Add($"episode {entityId}");
+                _logger.LogInformation("Progress: {Done}/{Total} library episodes checked, {Matched} Bingers episodes matched", done, episodes.Count, result.Matched + pending.Count);
             }
+        }
+
+        await FlushAsync(pending, emitted, episodeEntries, result, onBatch).ConfigureAwait(false);
+
+        if (failedShows > 0)
+        {
+            _logger.LogInformation("{Count} shows of user {User} were skipped (not found in the Bingers catalog or requests failing)", failedShows, user.Username);
+        }
+
+        foreach (var entityId in episodeEntries.Keys.Where(id => !emitted.Contains(id)))
+        {
+            result.Unmatched.Add($"episode {entityId}");
+        }
+    }
+
+    private static async Task FlushAsync(
+        Dictionary<string, (List<BaseItem> Items, string Label, bool Repeated)> pending,
+        HashSet<string> emitted,
+        Dictionary<string, BingersSyncEntry> episodeEntries,
+        BingersLibraryMatchResult result,
+        Func<IReadOnlyList<BingersLibraryMatch>, Task> onBatch)
+    {
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        var batch = pending
+            .Select(kv => new BingersLibraryMatch(episodeEntries[kv.Key], kv.Value.Items, kv.Value.Label, kv.Value.Repeated))
+            .ToList();
+        foreach (var match in batch)
+        {
+            if (emitted.Add(match.Entry.EntityId))
+            {
+                result.Matched++;
+            }
+        }
+
+        pending.Clear();
+        await onBatch(batch).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Groups episodes by show, merging the shows that share a provider id or a name, ordered by show name.
+    /// </summary>
+    private static List<List<Episode>> GroupByShow(List<Episode> episodes)
+    {
+        var parent = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string Find(string key)
+        {
+            while (parent[key] != key)
+            {
+                key = parent[key] = parent[parent[key]];
+            }
+
+            return key;
+        }
+
+        void Union(string a, string b)
+        {
+            parent.TryAdd(a, a);
+            parent.TryAdd(b, b);
+            var ra = Find(a);
+            var rb = Find(b);
+            if (!string.Equals(ra, rb, StringComparison.OrdinalIgnoreCase))
+            {
+                parent[ra] = rb;
+            }
+        }
+
+        // Link every series item to its provider ids and name; series sharing any of them end up in the same group.
+        var seriesKeys = new Dictionary<Guid, string>();
+        foreach (var series in episodes.Select(e => e.Series).Where(s => s != null).GroupBy(s => s.Id).Select(g => g.First()))
+        {
+            var own = "series:" + series.Id.ToString("N");
+            parent.TryAdd(own, own);
+            foreach (var key in ShowKeys(series))
+            {
+                Union(own, key);
+            }
+
+            seriesKeys[series.Id] = own;
+        }
+
+        return episodes
+            .GroupBy(e => Find(seriesKeys[e.Series.Id]), StringComparer.OrdinalIgnoreCase)
+            .Select(g => g
+                .OrderBy(e => e.ParentIndexNumber ?? e.Season?.IndexNumber)
+                .ThenBy(e => e.IndexNumber)
+                .ToList())
+            .OrderBy(g => g[0].SeriesName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static IEnumerable<string> ShowKeys(Series series)
+    {
+        foreach (var (name, provider) in new[] { ("tvdb", MetadataProvider.Tvdb), ("tmdb", MetadataProvider.Tmdb), ("imdb", MetadataProvider.Imdb) })
+        {
+            var id = series.GetProviderId(provider);
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                yield return name + ":" + id.Trim();
+            }
+        }
+
+        var normalized = new string((series.Name ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        if (normalized.Length > 0)
+        {
+            yield return "name:" + normalized + ":" + series.ProductionYear;
         }
     }
 
