@@ -13,8 +13,34 @@ on:
     - cron: '24 2 * * 4'
   workflow_dispatch:
 
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/scan-codeql.yaml@9b367ad7b96c2a5e0ce27675815bc9755ae0a971 # master
-    with:
-      repository-name: jellyfin/jellyfin-plugin-trakt
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'TOomaAh/jellyfin-plugin-bingers' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          queries: +security-and-quality
+
+      - name: Build
+        run: dotnet build Bingers.sln --configuration Release
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

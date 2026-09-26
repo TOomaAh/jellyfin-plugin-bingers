@@ -1,9 +1,35 @@
-_extends: jellyfin-meta-plugins
+name-template: 'Version $RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+# Jellyfin plugins use a single incrementing version number (v1, v2, ...).
+version-template: '$MAJOR'
+version-resolver:
+  default: major
+
+categories:
+  - title: ':boom: Breaking Changes'
+    labels:
+      - 'breaking'
+  - title: ':sparkles: New Features'
+    labels:
+      - 'feature'
+      - 'enhancement'
+  - title: ':bug: Bug Fixes'
+    labels:
+      - 'bug'
+      - 'fix'
+  - title: ':arrow_up: Dependency Updates'
+    labels:
+      - 'dependencies'
+  - title: ':pencil2: Other Changes'
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+exclude-labels:
+  - 'skip-changelog'
 
 template: |
   <!-- Optional: add a release summary here -->
-  [Plugin build can be downloaded here](https://repo.jellyfin.org/releases/plugin/trakt/trakt_$NEXT_MAJOR_VERSION.0.0.0.zip).
-
-  ## :sparkles: What's New
+  Install from the plugin repository `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`
+  or download the zip attached to this release.
 
   $CHANGES

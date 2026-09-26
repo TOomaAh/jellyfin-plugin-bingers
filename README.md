@@ -17,6 +17,22 @@ Features, per Jellyfin user:
 
 Bingers has no public "unwatch", collection or rating API, so those Trakt features are not available.
 
+## Installation
+
+1. In Jellyfin, open *Dashboard > Plugins > Repositories* (or *Catalog > ⚙*) and add a repository with the URL
+   `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`.
+2. Install **Bingers** from the catalog and restart Jellyfin.
+
+The zip of each version is also attached to the [GitHub releases](https://github.com/TOomaAh/jellyfin-plugin-bingers/releases).
+
+## Releasing
+
+1. Merged pull requests are collected in a draft release by the *Create/Update Release Draft* workflow
+   (label them `feature`, `bug`, `dependencies`... to group them).
+2. Publish the draft (tag `v1`, `v2`, ...). The *Publish Plugin* workflow builds the plugin with
+   [JPRM](https://github.com/oddstr13/jellyfin-plugin-repository-manager), attaches the zip to the release and adds the
+   version to `manifest.json` on the `manifest` branch. The release notes become the changelog shown in Jellyfin.
+
 ## Linking an account
 
 1. In *Dashboard > Plugins > Bingers*, select the Jellyfin user.

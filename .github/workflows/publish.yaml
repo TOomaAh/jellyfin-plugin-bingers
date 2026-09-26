@@ -1,18 +1,113 @@
 name: '🚀 Publish Plugin'
 
+# Publishing a GitHub release (tag `v2`, `2` or `2.0.0.0`) builds the plugin, attaches the zip to the release and
+# adds the version to the plugin repository manifest kept on the `manifest` branch. Users install the plugin by adding
+# https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json
+# to Dashboard > Plugins > Repositories.
+
 on:
   release:
     types:
-      - released
-  workflow_dispatch:
+      - published
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/publish.yaml@9b367ad7b96c2a5e0ce27675815bc9755ae0a971 # master
-    with:
-      version: ${{ github.event.release.tag_name }}
-      is-unstable: ${{ github.event.release.prerelease }}
-    secrets:
-      deploy-host: ${{ secrets.REPO_HOST }}
-      deploy-user: ${{ secrets.REPO_USER }}
-      deploy-key: ${{ secrets.REPO_KEY }}
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'TOomaAh/jellyfin-plugin-bingers' }}
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Compute Version
+        run: |-
+          version="${TAG#v}"
+          # Jellyfin plugin versions have four parts: 2 -> 2.0.0.0, 2.1 -> 2.1.0.0
+          while [ "$(echo "$version" | tr -cd '.' | wc -c)" -lt 3 ]; do
+            version="${version}.0"
+          done
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Release tag '${TAG}' is not a version (expected v2, 2, 2.1 or 2.0.0.0)"
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - name: Set Version and Changelog
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |-
+          sed -i Directory.Build.props \
+            -e "s;<Version>.*</Version>;<Version>${VERSION}</Version>;" \
+            -e "s;<AssemblyVersion>.*</AssemblyVersion>;<AssemblyVersion>${VERSION}</AssemblyVersion>;" \
+            -e "s;<FileVersion>.*</FileVersion>;<FileVersion>${VERSION}</FileVersion>;"
+          # The release notes become the changelog shown in Jellyfin's plugin catalog.
+          if [ -n "${RELEASE_BODY}" ]; then
+            export CHANGELOG="${RELEASE_BODY}"
+            yq eval '.changelog = strenv(CHANGELOG) | .changelog style="literal"' -i build.yaml
+          fi
+          yq eval '.version = env(VERSION)' -i build.yaml
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install JPRM
+        run: pip install jprm
+
+      - name: Build Jellyfin Plugin
+        run: |-
+          mkdir -p artifacts
+          artifact="$(jprm --verbosity=warning plugin build . --output=artifacts --version="${VERSION}" --dotnet-framework=net10.0 | tail -n1)"
+          echo "ARTIFACT=${artifact}" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=$(basename "${artifact}")" >> "$GITHUB_ENV"
+
+      - name: Upload Release Assets
+        run: |-
+          cd "$(dirname "${ARTIFACT}")"
+          md5sum "${ARTIFACT_NAME}" > "${ARTIFACT_NAME%.zip}.md5"
+          sha256sum "${ARTIFACT_NAME}" > "${ARTIFACT_NAME%.zip}.sha256"
+          gh release upload "${TAG}" "${ARTIFACT_NAME}" "${ARTIFACT_NAME%.zip}.md5" "${ARTIFACT_NAME%.zip}.sha256" \
+            --clobber --repo "${GITHUB_REPOSITORY}"
+
+      - name: Checkout Manifest Branch
+        run: |-
+          if git ls-remote --exit-code --heads origin manifest > /dev/null; then
+            git fetch origin manifest
+            git worktree add repo origin/manifest
+            git -C repo checkout -B manifest origin/manifest
+          else
+            git worktree add --detach repo
+            git -C repo checkout --orphan manifest
+            git -C repo rm -rf --quiet .
+            jprm repo init repo
+          fi
+
+      - name: Update Manifest
+        run: |-
+          jprm --verbosity=debug repo add \
+            --plugin-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${ARTIFACT_NAME}" \
+            repo "${ARTIFACT}"
+
+      - name: Push Manifest
+        working-directory: repo
+        run: |-
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Add Bingers ${VERSION} to the plugin repository"
+          git push origin manifest

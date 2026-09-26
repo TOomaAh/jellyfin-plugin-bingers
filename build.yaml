@@ -1,10 +1,11 @@
 ---
 name: "Bingers"
 guid: "ac5439e6-35f8-4c3c-b2ef-b69950d1c991"
+imageUrl: "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png"
 version: 1
 targetAbi: "12.1.0.0"
 framework: "net10.0"
-owner: "jellyfin"
+owner: "TOomaAh"
 overview: "Record your watched media with Bingers"
 description: >
   Mark the movies and episodes you watch in Jellyfin as watched on bingers.app.

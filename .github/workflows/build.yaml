@@ -13,6 +13,41 @@ on:
       - '**/*.md'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@9b367ad7b96c2a5e0ce27675815bc9755ae0a971 # master
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install JPRM
+        run: pip install jprm
+
+      # Warnings are errors (see Bingers.csproj), so this also acts as the lint/test gate.
+      - name: Build Jellyfin Plugin
+        id: jprm
+        run: |-
+          mkdir -p artifacts
+          artifact="$(jprm --verbosity=warning plugin build . --output=artifacts --dotnet-framework=net10.0 | tail -n1)"
+          echo "artifact=${artifact}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          retention-days: 30
+          if-no-files-found: error
+          path: ${{ steps.jprm.outputs.artifact }}
