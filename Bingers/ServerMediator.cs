@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Bingers.Api;
 using Bingers.Helpers;
+using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -23,6 +25,10 @@ public class ServerMediator : IHostedService, IDisposable
     private readonly IUserDataManager _userDataManager;
     private readonly UserDataManagerEventsHelper _userDataManagerEventsHelper;
     private readonly BingersApi _bingersApi;
+    private readonly IServerConfigurationManager _configurationManager;
+
+    // Last playback position reported for each user and item, used when a client stops without reporting it.
+    private readonly ConcurrentDictionary<(Guid UserId, Guid ItemId), long> _lastPositions = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerMediator"/> class.
@@ -31,15 +37,18 @@ public class ServerMediator : IHostedService, IDisposable
     /// <param name="userDataManager">The <see cref="IUserDataManager"/>.</param>
     /// <param name="loggerFactory">The <see cref="ILoggerFactory"/>.</param>
     /// <param name="bingersApi">The <see cref="BingersApi"/>.</param>
+    /// <param name="configurationManager">The <see cref="IServerConfigurationManager"/>.</param>
     public ServerMediator(
         ISessionManager sessionManager,
         IUserDataManager userDataManager,
         ILoggerFactory loggerFactory,
-        BingersApi bingersApi)
+        BingersApi bingersApi,
+        IServerConfigurationManager configurationManager)
     {
         _sessionManager = sessionManager;
         _userDataManager = userDataManager;
         _bingersApi = bingersApi;
+        _configurationManager = configurationManager;
 
         _logger = loggerFactory.CreateLogger<ServerMediator>();
         _userDataManagerEventsHelper = new UserDataManagerEventsHelper(loggerFactory.CreateLogger<UserDataManagerEventsHelper>(), _bingersApi);
@@ -91,6 +100,24 @@ public class ServerMediator : IHostedService, IDisposable
     }
 
     /// <summary>
+    /// Media playback has started or progressed: remember the position.
+    /// </summary>
+    /// <param name="sender">The sending entity.</param>
+    /// <param name="args">The <see cref="PlaybackProgressEventArgs"/>.</param>
+    private void KernelPlaybackProgress(object sender, PlaybackProgressEventArgs args)
+    {
+        if (args.Item is not Movie and not Episode || args.Users == null || !args.PlaybackPositionTicks.HasValue)
+        {
+            return;
+        }
+
+        foreach (var user in args.Users)
+        {
+            _lastPositions[(user.Id, args.Item.Id)] = args.PlaybackPositionTicks.Value;
+        }
+    }
+
+    /// <summary>
     /// Media playback has stopped.
     /// Depending on playback progress, let bingers.app know the user has completed watching the item.
     /// </summary>
@@ -113,6 +140,11 @@ public class ServerMediator : IHostedService, IDisposable
 
         if (!playbackStoppedEventArgs.PlayedToCompletion)
         {
+            foreach (var user in playbackStoppedEventArgs.Users)
+            {
+                _lastPositions.TryRemove((user.Id, item.Id), out _);
+            }
+
             _logger.LogDebug(
                 "Item {Item} was not played to completion ({Position} of {Runtime}). Not marking it as watched.",
                 item.Name,
@@ -123,6 +155,7 @@ public class ServerMediator : IHostedService, IDisposable
 
         foreach (var user in playbackStoppedEventArgs.Users)
         {
+            _lastPositions.TryRemove((user.Id, item.Id), out var lastPosition);
             var bingersUser = UserHelper.GetBingersUser(user, true);
 
             if (bingersUser == null)
@@ -145,10 +178,51 @@ public class ServerMediator : IHostedService, IDisposable
                 continue;
             }
 
+            // Jellyfin also reports "played to completion" when the client did not send its position, when the runtime
+            // is unknown or for short items. Only trust the actual progress, against Jellyfin's own threshold.
+            var position = playbackStoppedEventArgs.PlaybackPositionTicks is > 0
+                ? playbackStoppedEventArgs.PlaybackPositionTicks.Value
+                : lastPosition;
+            var runtime = item.RunTimeTicks ?? 0;
+            var threshold = _configurationManager.Configuration.MaxResumePct;
+            if (position <= 0 || runtime <= 0)
+            {
+                _logger.LogInformation(
+                    "User {User} stopped {Item}: Jellyfin considers it played but its progress is unknown (position {Position}, runtime {Runtime}); not marked as watched on bingers.app.",
+                    user.Username,
+                    item.Name,
+                    TimeSpan.FromTicks(position),
+                    TimeSpan.FromTicks(runtime));
+                continue;
+            }
+
+            var percent = 100d * position / runtime;
+            if (percent < threshold && position < runtime - TimeSpan.TicksPerSecond)
+            {
+                _logger.LogInformation(
+                    "User {User} stopped {Item} at {Percent:0}% ({Position} of {Runtime}), below the {Threshold}% needed to count as watched; not marked as watched on bingers.app.",
+                    user.Username,
+                    item.Name,
+                    percent,
+                    TimeSpan.FromTicks(position),
+                    TimeSpan.FromTicks(runtime),
+                    threshold);
+                continue;
+            }
+
+            // The event's PlayedToCompletion only reflects the last user Jellyfin processed: make sure Jellyfin
+            // actually marked the item as played for this user.
+            var userData = _userDataManager.GetUserData(user, item);
+            if (userData?.Played != true)
+            {
+                _logger.LogVerbose(verbose, "User {User} stopped {Item} but Jellyfin did not mark it as played for this user; not marked as watched on bingers.app.", user.Username, item.Name);
+                continue;
+            }
+
             try
             {
                 // The play count already includes this play. Only pass it for rewatches, like scroblarr does.
-                var playCount = _userDataManager.GetUserData(user, item)?.PlayCount ?? 0;
+                var playCount = userData.PlayCount;
                 var allowRewatch = item is Movie ? bingersUser.MarkMoviesAsRewatched : bingersUser.MarkEpisodesAsRewatched;
 
                 _logger.LogVerbose(verbose, "User {User} completed watching item {Item} (Jellyfin play count {PlayCount}). Marking it as watched on bingers.app.", user.Username, item.Name, playCount);
@@ -174,6 +248,8 @@ public class ServerMediator : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _userDataManager.UserDataSaved += OnUserDataSaved;
+        _sessionManager.PlaybackStart += KernelPlaybackProgress;
+        _sessionManager.PlaybackProgress += KernelPlaybackProgress;
         _sessionManager.PlaybackStopped += KernelPlaybackStopped;
 
         return Task.CompletedTask;
@@ -183,6 +259,8 @@ public class ServerMediator : IHostedService, IDisposable
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _userDataManager.UserDataSaved -= OnUserDataSaved;
+        _sessionManager.PlaybackStart -= KernelPlaybackProgress;
+        _sessionManager.PlaybackProgress -= KernelPlaybackProgress;
         _sessionManager.PlaybackStopped -= KernelPlaybackStopped;
         return Task.CompletedTask;
     }
