@@ -9,6 +9,14 @@
         "imageUrl": "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png",
         "versions": [
             {
+                "version": "5.0.0.0",
+                "changelog": "<!-- Optional: add a release summary here -->\r\nInstall from the plugin repository `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`\r\nor download the zip attached to this release.\r\n\r\n- Only mark an item as watched on Bingers when Jellyfin marked it as played for that user and the playback position actually reached Jellyfin's \"maximum resume percentage\" (90% by default); fixes partially watched items sent as watched when the client does not report its position\r\n",
+                "targetAbi": "12.1.0.0",
+                "sourceUrl": "https://github.com/TOomaAh/jellyfin-plugin-bingers/releases/download/v5/bingers_5.0.0.0.zip",
+                "checksum": "3d8e186f5882e4ad6512fe8ba6c1a764",
+                "timestamp": "2026-10-09T07:50:43Z"
+            },
+            {
                 "version": "4.0.0.0",
                 "changelog": "<!-- Optional: add a release summary here -->\r\nInstall from the plugin repository `https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/manifest/manifest.json`\r\nor download the zip attached to this release.\r\n\r\n- Import and clean up tasks apply their changes batch by batch while matching: a cancelled or failing run keeps what was already done\r\n- Catalog requests are retried on timeouts, network and server errors; a failing show or item is skipped instead of cancelling the whole task\r\n- Copies of a show in several libraries are matched together, so the clean up never removes an episode that another copy has played",
                 "targetAbi": "12.1.0.0",
