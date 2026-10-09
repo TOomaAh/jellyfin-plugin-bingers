@@ -2,7 +2,7 @@
 name: "Bingers"
 guid: "ac5439e6-35f8-4c3c-b2ef-b69950d1c991"
 imageUrl: "https://raw.githubusercontent.com/TOomaAh/jellyfin-plugin-bingers/master/images/jellyfin-plugin-bingers.png"
-version: "4.0.0.0"
+version: "5.0.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "TOomaAh"
@@ -14,6 +14,4 @@ category: "General"
 artifacts:
   - "Bingers.dll"
 changelog: |-
-  - Import and clean up tasks apply their changes batch by batch while matching: a cancelled or failing run keeps what was already done
-  - Catalog requests are retried on timeouts, network and server errors; a failing show or item is skipped instead of cancelling the whole task
-  - Copies of a show in several libraries are matched together, so the clean up never removes an episode that another copy has played
+  - Only mark an item as watched on Bingers when Jellyfin marked it as played for that user and the playback position actually reached Jellyfin's "maximum resume percentage" (90% by default); fixes partially watched items sent as watched when the client does not report its position
